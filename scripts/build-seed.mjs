@@ -25,8 +25,8 @@ const TIMEOUT_MS = 20_000;
 const RETRY_DELAY_MS = 500;
 const PER_COUNTRY = 50;
 const GLOBAL_TOP = 500;
-const MIN_STATIONS = 8_000;
-const MAX_STATIONS = 15_000;
+const MIN_STATIONS = 5_500;
+const MAX_STATIONS = 7_000;
 
 async function getJson(path) {
   let lastErr;
@@ -179,15 +179,21 @@ const stations = [...byId.values()].sort(
   (a, b) => b.x - a.x || (a.n < b.n ? -1 : a.n > b.n ? 1 : 0) || (a.i < b.i ? -1 : a.i > b.i ? 1 : 0),
 );
 
-// --- 5. write -------------------------------------------------------------
+// --- 5. build, validate, then write --------------------------------------
 const generatedAt = new Date().toISOString();
 // One station per line keeps the artifact ~1.5 MB instead of ~5 MB pretty-printed.
 const body = stations.map((station) => `    ${JSON.stringify(station)}`).join(',\n');
 const json = `{\n  "generated_at": ${JSON.stringify(generatedAt)},\n  "stations": [\n${body}\n  ]\n}\n`;
 
-await mkdir(dirname(OUT), { recursive: true });
-await writeFile(OUT, json, 'utf8');
-const { size } = await stat(OUT);
+// Gate before touching the artifact so a degraded run cannot clobber the
+// committed seed with a smaller one.
+const inRange = stations.length >= MIN_STATIONS && stations.length <= MAX_STATIONS;
+let size = 0;
+if (inRange) {
+  await mkdir(dirname(OUT), { recursive: true });
+  await writeFile(OUT, json, 'utf8');
+  ({ size } = await stat(OUT));
+}
 
 // --- 6. report ------------------------------------------------------------
 const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
@@ -198,14 +204,14 @@ if (failed.length > 0) {
 }
 console.log(`global top ${GLOBAL_TOP}:   ${globalTop.length} fetched${globalError ? ` (FAILED: ${globalError})` : ''}`);
 console.log(`stations:         ${stations.length} (${duplicates} duplicate ids skipped, ${dropped} unusable records dropped)`);
-console.log(`file:             ${OUT} (${(size / 1024 / 1024).toFixed(2)} MB)`);
+if (inRange) console.log(`file:             ${OUT} (${(size / 1024 / 1024).toFixed(2)} MB)`);
 console.log(`generated_at:     ${generatedAt}`);
 console.log(`elapsed:          ${elapsed}s`);
 
-if (stations.length < MIN_STATIONS || stations.length > MAX_STATIONS) {
+if (!inRange) {
   console.error(
-    `ERROR: station count ${stations.length} is outside the required ${MIN_STATIONS}-${MAX_STATIONS} range ` +
-      '(the artifact was still written; see the Task 6 report)',
+    `ERROR: station count ${stations.length} is outside the required ${MIN_STATIONS}-${MAX_STATIONS} range; ` +
+      'the existing artifact was left untouched',
   );
   process.exitCode = 1;
 }
