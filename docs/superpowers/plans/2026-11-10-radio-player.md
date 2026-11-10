@@ -1,8 +1,8 @@
-# 电台播放器 Implementation Plan
+﻿# 电台播放器 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 交付一个 Windows 可安装的 Tauri 2 电台播放器：340×64 折叠条 + 340×440 面板、托盘常驻、边缘吸附、置顶、精选 1 万台内置电台库 + 增量同步、三种播放模式 × 三种切换范围、收藏。
+**Goal:** 交付一个 Windows 可安装的 Tauri 2 电台播放器：340×64 折叠条 + 340×440 面板、托盘常驻、边缘吸附、置顶、精选约 5,900 台内置电台库 + 增量同步、三种播放模式 × 三种切换范围、收藏。
 
 **Architecture:** Rust 核（`src-tauri/src/`）是唯一真相源：`model`/`state`/`library`/`queue`/`snap`/`sync`/`storage` 为纯逻辑（可 `cargo test` 单测），`app_core.rs` 把一次操作编译成 `Vec<CoreEffect>`，`commands.rs` 负责 Tauri 薄封装与事件推送。前端（`src/`）无框架 TS：只渲染 `UiState` 并把音频错误上报；播放用 `<audio>` + hls.js（仅 `.m3u8`）。
 
@@ -15,7 +15,7 @@
 - 平台：Windows 10/11 x64 为 v1 验收目标；所有 `cfg(windows)` 只允许出现在 `window_platform.rs` 与 `snap.rs` 的调用处，其余模块保持跨平台可编译（M8 为 macOS 留口）。
 - 数据源：radio-browser（`https://de1.api.radio-browser.info`），请求必须带 `User-Agent: radiobar/0.1`。数据 CC0。
 - 性能预算：安装包 < 15 MB、常驻内存 < 120 MB、冷启动可操作 < 1.5 s、空闲 CPU < 1%。
-- 内置快照约 1 万台（每国 top50 + 全球 top500 去重），`stations.local.json` 首次启动从 seed 复制，之后只增量合并，不主动扩到 52k 全量。
+- 内置快照 5,500–7,000 台（实测：每国 top50 + 全球 top500 去重 = 5,938），`stations.local.json` 首次启动从 seed 复制，之后只增量合并，不主动扩到 52k 全量。
 - 界面：折叠条 340×64，面板 340×440；无系统标题栏；圆角 14；深色 `#141a1f`/`#e8eef2`/`#3ecfb2`，浅色跟随系统；中文 UI。
 - 播放模式三态：`sequential`（到末尾停住）/ `loop`（回绕）/ `shuffle`（本轮不重复，prev 回放历史）；范围三态：`favorites` / `list` / `all`。
 - 失败策略：单台最多两次尝试（`urlResolved` 一次 → 原始 `url` 一次）；连续失败 3 台停播；`lastcheckok == false` 的台不进队列但进列表。
@@ -397,7 +397,7 @@ pub fn is_visible_on(rect: Rect, work_areas: &[Rect]) -> bool;
 
 - [ ] **Step 2: 写 `build-seed.mjs`**
 
-流程：GET `/json/countries` → 对每个国家 GET `/json/stations/bycountrycodeexact/{cc}?limit=50&hidebroken=true&order=clickcount&reverse=true`（8 并发，2 次重试，超时 20 s）→ 再 GET `/json/stations/topclick/500?hidebroken=true` → 按 uuid 去重、国家 top50 优先保留 → 映射成短键（`t` 取 tags 前 2 个，`x` = clickcount）→ 写 `{generated_at: new Date().toISOString(), stations}`。打印统计：国家数/总台数/失败国家数/文件大小。要求：失败国家跳过但记录；单次失败不影响其他；总台数在 8,000–15,000 之间。
+流程：GET `/json/countries` → 对每个国家 GET `/json/stations/bycountrycodeexact/{cc}?limit=50&hidebroken=true&order=clickcount&reverse=true`（8 并发，2 次重试，超时 20 s）→ 再 GET `/json/stations/topclick/500?hidebroken=true` → 按 uuid 去重、国家 top50 优先保留 → 映射成短键（`t` 取 tags 前 2 个，`x` = clickcount）→ 写 `{generated_at: new Date().toISOString(), stations}`。打印统计：国家数/总台数/失败国家数/文件大小。要求：失败国家跳过但记录；单次失败不影响其他；总台数在 5,500–7,000 之间。
 
 - [ ] **Step 3: 运行脚本**（需完全权限网络）
 
