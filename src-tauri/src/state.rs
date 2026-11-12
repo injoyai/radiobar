@@ -69,6 +69,8 @@ pub struct UiState {
     pub can_prev: bool,
     pub autoplay_on_launch: bool,
     pub auto_next_on_failure: bool,
+    /// 面板展开时朝上长（折叠条贴近工作区下部）；前端据此反转顺序，让条子钉在原地。
+    pub panel_grows_up: bool,
 }
 
 #[cfg(test)]

@@ -139,10 +139,16 @@ pub fn snap_bar_window(window: &WebviewWindow) -> Option<Rect> {
     Some(snapped)
 }
 
-/// 展开 / 收起面板；返回 canonical 折叠条位置。
-pub fn apply_panel(window: &WebviewWindow, bar: Rect, open: bool) -> Rect {
+/// 展开 / 收起面板；返回 canonical 折叠条位置与本次展开方向（朝上为 true）。
+/// 方向判断与 `snap::expanded_rect` 同源，避免前后端各算一套。
+pub fn apply_panel(window: &WebviewWindow, bar: Rect, open: bool) -> (Rect, bool) {
     if open {
-        if let Some(work) = current_work_rect(window) {
+        let work = current_work_rect(window);
+        let grows_up = match work {
+            Some(work) => bar.y + BAR_H / 2 >= work.y + work.h / 2,
+            None => false,
+        };
+        if let Some(work) = work {
             let expanded = expanded_rect(
                 Rect {
                     w: BAR_W,
@@ -157,11 +163,12 @@ pub fn apply_panel(window: &WebviewWindow, bar: Rect, open: bool) -> Rect {
         } else {
             apply_size(window, BAR_W, PANEL_H);
         }
+        (bar, grows_up)
     } else {
         apply_size(window, BAR_W, BAR_H);
         apply_position(window, bar.x, bar.y);
+        (bar, false)
     }
-    bar
 }
 
 /// 面板展开时窗口被拖动：由窗口矩形反推折叠条矩形。

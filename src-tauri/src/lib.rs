@@ -67,6 +67,17 @@ pub fn apply_effects(
 ) {
     let mut need_persist = false;
 
+    // 面板几何要在 emit 之前处理：展开方向（panel_grows_up）是 apply_panel 写进
+    // core 的，晚于 emit 的话前端收到的 state 里方向还是旧值，DOM 顺序不会反转。
+    let mut ui = ui;
+    for effect in effects.iter() {
+        if let CoreEffect::ResizePanel(open) = effect {
+            apply_panel(app, *open);
+            let state = app.state::<AppState>();
+            ui.panel_grows_up = state.core.lock().unwrap().panel_grows_up;
+        }
+    }
+
     for effect in effects {
         match effect {
             CoreEffect::EmitState => {
@@ -84,7 +95,8 @@ pub fn apply_effects(
                     let _ = window.set_always_on_top(value);
                 }
             }
-            CoreEffect::ResizePanel(open) => apply_panel(app, open),
+            // 已在上面提前处理（必须在 EmitState 之前）。
+            CoreEffect::ResizePanel(_) => {}
             CoreEffect::SetTrayTooltip(text) => {
                 if let Some(tray) = app.tray_by_id(TRAY_ID) {
                     let _ = tray.set_tooltip(text.as_deref());
@@ -122,7 +134,10 @@ fn apply_panel(app: &AppHandle, open: bool) {
             None => return,
         },
     };
-    window_platform::apply_panel(&window, bar, open);
+    let (_bar, grows_up) = window_platform::apply_panel(&window, bar, open);
+    let state = app.state::<AppState>();
+    let mut core = state.core.lock().unwrap();
+    core.panel_grows_up = grows_up;
 }
 
 /// 锁住核心、执行一次动作、把副作用派发出去。

@@ -32,6 +32,8 @@ pub struct AppCore {
     consecutive_failures: u32,
     try_original_url: bool,
     rng: StdRng,
+    /// 上次 `apply_panel` 判定的展开方向（由窗口层回写，供前端决定 DOM 顺序）。
+    pub panel_grows_up: bool,
 }
 
 impl AppCore {
@@ -51,6 +53,7 @@ impl AppCore {
             consecutive_failures: 0,
             try_original_url: false,
             rng: StdRng::seed_from_u64(seed),
+            panel_grows_up: false,
         };
         core.rebuild_queue();
         core
@@ -100,6 +103,7 @@ impl AppCore {
             can_prev: self.can_step(false),
             autoplay_on_launch: self.persisted.autoplay_on_launch,
             auto_next_on_failure: self.persisted.auto_next_on_failure,
+            panel_grows_up: self.panel_grows_up,
         }
     }
 
@@ -463,6 +467,16 @@ mod tests {
             CoreEffect::Toast { text, .. } => Some(text.clone()),
             _ => None,
         })
+    }
+
+    #[test]
+    fn test_ui_state_reports_panel_grows_up() {
+        let mut core = core_with(Scope::All);
+        assert!(!core.ui_state().panel_grows_up);
+        core.panel_grows_up = true;
+        assert!(core.ui_state().panel_grows_up);
+        core.panel_grows_up = false;
+        assert!(!core.ui_state().panel_grows_up);
     }
 
     #[test]

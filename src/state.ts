@@ -44,6 +44,8 @@ export interface UiState {
   canPrev: boolean;
   autoplayOnLaunch: boolean;
   autoNextOnFailure: boolean;
+  /** 面板展开时朝上长；前端据此反转 DOM 顺序，让折叠条钉在原地。 */
+  panelGrowsUp: boolean;
 }
 
 export interface CountryInfo {

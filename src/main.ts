@@ -6,8 +6,9 @@ import { getState, setState, type UiState } from "./state";
 import { mountBar } from "./ui/bar";
 import { mountPanel } from "./ui/panel";
 
-const app = document.querySelector<HTMLDivElement>("#app");
-if (!app) throw new Error("missing #app");
+const appRoot = document.querySelector<HTMLDivElement>("#app");
+if (!appRoot) throw new Error("missing #app");
+const app: HTMLDivElement = appRoot;
 
 const bar = mountBar(app);
 const panel = mountPanel(app);
@@ -21,6 +22,8 @@ let gestureSeen = false;
 
 function render(state: UiState): void {
   setState(state);
+  // 面板朝上长时反转 DOM 顺序，折叠条才会钉在原地而不是被顶到窗口顶部。
+  app.classList.toggle("expand-up", state.panelOpen && state.panelGrowsUp);
   bar.render(state);
   panel.render(state);
   audio.updateStation(state.current);
