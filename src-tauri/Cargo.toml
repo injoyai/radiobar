@@ -2,7 +2,7 @@
 name = "radiobar"
 version = "0.1.0"
 description = "radiobar - a minimal Tauri radio player"
-authors = []
+authors = ["radiobar"]
 edition = "2021"
 
 [lib]

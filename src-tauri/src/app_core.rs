@@ -132,7 +132,8 @@ impl AppCore {
 
     pub fn set_scope(&mut self, s: Scope) -> Vec<CoreEffect> {
         self.persisted.scope = s;
-        self.rebuild_queue();
+        // 设计 §16「当前列表」：换范围不立刻重建队列，避免正在播的台从队列里被踢掉
+        // 导致「声音在放、条上却显示未选择电台」。队列在下次切台/播放时按新范围重建。
         self.state_effects(true)
     }
 
@@ -581,5 +582,25 @@ mod tests {
         assert_eq!(state.scope, Scope::List);
         core.next();
         assert!(core.ui_state().current.is_some());
+    }
+
+    #[test]
+    fn test_scope_switch_keeps_playing_station() {
+        // 设计 §16：播放中改范围不应把正在播的台从队列里踢掉（否则声音在放、条上却显示未选择电台）。
+        let mut core = core_with(Scope::All);
+        core.play_station("c");
+        let before = core.ui_state().current.expect("current station");
+        assert_eq!(before.id, "c");
+
+        core.set_scope(Scope::Favorites);
+
+        let after = core.ui_state();
+        assert_eq!(after.scope, Scope::Favorites);
+        assert_eq!(after.current.as_ref().map(|s| s.id.as_str()), Some("c"));
+        assert!(after.playing);
+
+        // 下一次切台才按新范围重建队列；收藏为空时给出空范围提示。
+        let effects = core.next();
+        assert_eq!(toast_text(&effects).as_deref(), Some("收藏为空，先去面板里加几台"));
     }
 }

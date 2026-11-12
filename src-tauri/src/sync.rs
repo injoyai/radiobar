@@ -123,7 +123,7 @@ struct RawStation {
     codec: String,
     #[serde(default)]
     bitrate: u32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_boolish")]
     hls: bool,
     #[serde(default)]
     votes: u32,
@@ -137,6 +137,27 @@ struct RawStation {
 
 fn default_lastcheck() -> u8 {
     1
+}
+
+/// radio-browser 的 `hls` 字段在真实响应里是数字 0/1（布尔值只是历史/测试写法），
+/// 两种形态都要能解析，否则整个国家的电台都会因反序列化失败而被丢弃。
+fn de_boolish<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error as _;
+    use serde_json::Value;
+    match Value::deserialize(deserializer)? {
+        Value::Bool(b) => Ok(b),
+        Value::Number(n) => Ok(n.as_f64().map(|f| f != 0.0).unwrap_or(false)),
+        Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" => Ok(true),
+            "" | "0" | "false" | "no" => Ok(false),
+            other => Err(D::Error::custom(format!("invalid hls value: {other}"))),
+        },
+        Value::Null => Ok(false),
+        other => Err(D::Error::custom(format!("invalid hls value: {other}"))),
+    }
 }
 
 impl RawStation {
@@ -287,6 +308,34 @@ mod tests {
         assert_eq!(s.len(), 20);
         assert!(s.ends_with('Z'));
         assert!(s.starts_with("202") || s.starts_with("20"));
+    }
+
+    /// 真实 radio-browser 响应里 `hls` 是数字 0/1，不是布尔值。
+    /// 夹具 `tests/fixtures/stations_api.json` 为 2026-11-11 从
+    /// `https://de1.api.radio-browser.info/json/stations/bycountrycodeexact/JP` 抓取的原始响应。
+    #[test]
+    fn test_raw_station_parses_real_api_payload() {
+        let raw: Vec<RawStation> =
+            serde_json::from_str(include_str!("../tests/fixtures/stations_api.json")).unwrap();
+        assert_eq!(raw.len(), 20);
+        let stations: Vec<Station> = raw.into_iter().map(RawStation::into_station).collect();
+        assert!(stations.iter().all(|s| !s.name.is_empty()));
+        assert!(stations.iter().any(|s| s.hls), "夹具含 hls=1 的台");
+        assert!(stations.iter().any(|s| !s.hls), "夹具含 hls=0 的台");
+        assert_eq!(stations[0].country_code, "JP");
+    }
+
+    #[test]
+    fn test_hls_accepts_number_and_bool() {
+        for (json, expected) in [
+            (r#"{"hls":0}"#, false),
+            (r#"{"hls":1}"#, true),
+            (r#"{"hls":true}"#, true),
+            (r#"{"hls":false}"#, false),
+        ] {
+            let raw: RawStation = serde_json::from_str(json).unwrap();
+            assert_eq!(raw.into_station().hls, expected, "payload {json}");
+        }
     }
 
     #[test]
