@@ -246,7 +246,6 @@ button {
 .volume-wrap {
   flex: 1 1 auto;
   min-width: 58px;
-  max-width: 78px;
   display: flex;
   align-items: center;
   gap: 1px;

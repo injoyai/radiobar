@@ -56,11 +56,12 @@ export const icons = {
     '<path d="M20 11.2a8.2 8.2 0 1 0-2.4 6.6"/><path d="M20 5.4v5.8h-5.8"/>',
   ),
   settings: svg(
-    '<circle cx="12" cy="12" r="3.2"/>' +
-      '<path d="M12 3.2v2.4M12 18.4v2.4M3.2 12h2.4M18.4 12h2.4M5.8 5.8l1.7 1.7M16.5 16.5l1.7 1.7M18.2 5.8l-1.7 1.7M7.5 16.5l-1.7 1.7"/>',
+    '<path d="M3.4 7h17.2"/><path d="M3.4 12h17.2"/><path d="M3.4 17h17.2"/>' +
+      '<circle cx="9" cy="7" r="2.1"/><circle cx="15.4" cy="12" r="2.1"/><circle cx="7.6" cy="17" r="2.1"/>',
   ),
   back: svg('<path d="M19 12H5"/><path d="m10.5 6.5-5.5 5.5 5.5 5.5"/>'),
   chevron: svg('<path d="m7 9.5 5 5 5-5"/>'),
+  "panel-toggle": svg('<path d="m7 14.5 5-5 5 5"/>'),
 } as const;
 
 export type IconName = keyof typeof icons;

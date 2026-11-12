@@ -78,7 +78,7 @@ export function mountBar(root: HTMLElement): BarHandle {
       </div>
       <button class="icon-btn" type="button" data-act="scope" title="切换范围" aria-label="切换范围">${icons.list}</button>
       <button class="icon-btn" type="button" data-act="mode" title="切换模式" aria-label="切换模式">${icons["mode-sequential"]}</button>
-      <button class="icon-btn" type="button" data-act="panel" title="打开面板" aria-label="打开面板">${icons.list}</button>
+      <button class="icon-btn" type="button" data-act="panel" title="展开面板" aria-label="展开面板">${icons["panel-toggle"]}</button>
       <button class="icon-btn pin-btn" type="button" data-act="pin" title="置顶" aria-label="置顶">${icons.pin}</button>
     </div>
   `;
@@ -97,6 +97,7 @@ export function mountBar(root: HTMLElement): BarHandle {
   const slider = element<HTMLInputElement>(bar, ".volume-slider");
   const scopeBtn = element<HTMLButtonElement>(bar, '[data-act="scope"]');
   const modeBtn = element<HTMLButtonElement>(bar, '[data-act="mode"]');
+  const panelBtn = element<HTMLButtonElement>(bar, '[data-act="panel"]');
   const pinBtn = element<HTMLButtonElement>(bar, '[data-act="pin"]');
 
   const toast = document.createElement("div");
@@ -178,6 +179,11 @@ export function mountBar(root: HTMLElement): BarHandle {
     modeBtn.setAttribute("aria-label", `切换模式，当前${modeLabel}`);
     modeBtn.dataset.mode = state.mode;
 
+    panelBtn.innerHTML = state.panelOpen ? icons.chevron : icons["panel-toggle"];
+    panelBtn.title = state.panelOpen ? "收起面板" : "展开面板";
+    panelBtn.setAttribute("aria-label", state.panelOpen ? "收起面板" : "展开面板");
+    panelBtn.setAttribute("aria-expanded", String(state.panelOpen));
+
     pinBtn.classList.toggle("is-active", state.alwaysOnTop);
     pinBtn.title = state.alwaysOnTop ? "置顶：开" : "置顶：关";
     pinBtn.setAttribute("aria-pressed", String(state.alwaysOnTop));
@@ -209,7 +215,7 @@ export function mountBar(root: HTMLElement): BarHandle {
         if (state) run(ipc.setMode(nextOf(MODE_CYCLE, state.mode)));
         break;
       case "panel":
-        run(ipc.setPanelOpen(true));
+        if (state) run(ipc.setPanelOpen(!state.panelOpen));
         break;
       case "pin":
         if (state) run(ipc.setAlwaysOnTop(!state.alwaysOnTop));
@@ -235,7 +241,7 @@ export function mountBar(root: HTMLElement): BarHandle {
 
   topRow.addEventListener("dblclick", (event) => {
     if ((event.target as Element).closest("[data-act]")) return;
-    run(ipc.setPanelOpen(true));
+    if (currentState) run(ipc.setPanelOpen(!currentState.panelOpen));
   });
 
   function showToast(payload: ToastPayload): void {
