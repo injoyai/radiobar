@@ -30,12 +30,28 @@ Vite 开发服务器固定在 `http://localhost:1420`。
 
 ```powershell
 npm run build          # 前端（Vite）
-npm run tauri build    # 安装包（NSIS）+ 免安装 exe
+npm run tauri build    # 免安装 exe（同时会尝试打 NSIS 安装包，见下）
 ```
 
 产物：
-- `src-tauri/target/release/radiobar.exe`
-- `src-tauri/target/release/bundle/nsis/radiobar_0.1.0_x64-setup.exe`
+- `src-tauri/target/release/radiobar.exe` —— **便携版（推荐交付方式）**，单文件、无外部依赖
+- `src-tauri/target/release/bundle/nsis/radiobar_0.1.0_x64-setup.exe` —— 可选安装包
+
+### 便携版（推荐）
+
+`radiobar.exe` 是自足的绿色单文件，直接双击即可运行，无需安装。建议先复制到仓库外的普通目录再运行，例如：
+
+```powershell
+New-Item -ItemType Directory -Force 'D:\Apps\radiobar' | Out-Null
+Copy-Item 'src-tauri\target\release\radiobar.exe' 'D:\Apps\radiobar\' -Force
+& 'D:\Apps\radiobar\radiobar.exe'
+```
+
+数据仍写在 `%APPDATA%\com.local.radiobar\`，与 exe 放在哪里无关。
+
+> 已知限制（本机实测）：
+> 1. **NSIS 安装包在含中文的路径下运行会静默失败**（`exit=2`，不安装也不报错）。把 setup.exe 复制到纯 ASCII 路径（如 `C:\Temp\`）再运行即可正常安装。便携版不受此影响。
+> 2. 若 exe 所在目录下残留过 WebView2 用户数据（`wv2data\EBWebView`），再次启动可能报 `WebView2 error: HRESULT(0x8000FFFF)` 或 `0x800700AA` 而退出。删除该残留目录（或把 exe 移到干净目录）即可恢复。
 
 ## 快速检查
 
