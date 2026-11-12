@@ -34,6 +34,10 @@
     --toast-bg: rgba(255, 255, 255, 0.97);
     --shadow: 0 12px 32px rgba(20, 26, 31, 0.16);
   }
+
+  #app {
+    box-shadow: 0 6px 18px rgba(20, 26, 31, 0.18);
+  }
 }
 
 * {
@@ -77,15 +81,20 @@ button {
 }
 
 #app {
-  position: relative;
-  width: 100vw;
-  height: 100vh;
+  position: absolute;
+  inset: 16px;
   display: flex;
   flex-direction: column;
   background: var(--bg);
   border-radius: 14px;
   overflow: hidden;
-  box-shadow: inset 0 0 0 1px var(--stroke);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.34);
+}
+
+/* 面板在折叠条下方展开时保持默认顺序；在下方空间不足时由 JS 加此类反转，
+   让折叠条钉在原地、面板从条的上方长出来。 */
+#app.expand-up {
+  flex-direction: column-reverse;
 }
 
 .icon {

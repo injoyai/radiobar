@@ -5,6 +5,30 @@ use crate::snap::{expanded_rect, is_visible_on, snap_bar, Rect, PANEL_H};
 pub const BAR_W: i32 = 340;
 pub const BAR_H: i32 = 64;
 
+/// 逻辑内容四周留出的透明边，用来让 CSS 画圆角投影
+/// （DWM 的矩形阴影在圆角处会露出直角，所以窗口不再要 DWM 阴影）。
+pub const SHADOW_PAD: i32 = 16;
+
+/// 逻辑尺寸 → 外框尺寸（四周各加 SHADOW_PAD）。
+pub fn outer_size(w: i32, h: i32) -> (i32, i32) {
+    (w + SHADOW_PAD * 2, h + SHADOW_PAD * 2)
+}
+
+/// 逻辑位置 → 外框位置（左上各减 SHADOW_PAD）。
+pub fn outer_position(x: i32, y: i32) -> (i32, i32) {
+    (x - SHADOW_PAD, y - SHADOW_PAD)
+}
+
+/// 外框矩形 → 逻辑矩形（去掉四周留边）。
+pub fn inner_rect(x: i32, y: i32, w: i32, h: i32) -> (i32, i32, i32, i32) {
+    (
+        x + SHADOW_PAD,
+        y + SHADOW_PAD,
+        w - SHADOW_PAD * 2,
+        h - SHADOW_PAD * 2,
+    )
+}
+
 /// 显示器工作区（排除任务栏）转成逻辑坐标的 Rect。
 fn monitor_work_rect(monitor: &tauri::Monitor) -> Rect {
     let scale = monitor.scale_factor();
@@ -36,42 +60,29 @@ pub fn current_work_rect(window: &WebviewWindow) -> Option<Rect> {
     Some(monitor_work_rect(&monitor))
 }
 
-/// 无边框窗口在 Windows 上带 DWM 阴影：外框比客户区每边大 8px（宽 +16、高 +8）。
-/// 折叠条的几何一律用客户区（= WebView 视口）坐标，写回窗口时再换算成外框。
-fn shadow_delta(window: &WebviewWindow) -> (i32, i32, i32, i32) {
-    let Ok(scale) = window.scale_factor() else {
-        return (0, 0, 0, 0);
-    };
-    let (Ok(outer_pos), Ok(inner_pos), Ok(outer_size), Ok(inner_size)) = (
-        window.outer_position(),
-        window.inner_position(),
-        window.outer_size(),
-        window.inner_size(),
-    ) else {
-        return (0, 0, 0, 0);
-    };
-    let dx = ((outer_pos.x - inner_pos.x) as f64 / scale).round() as i32;
-    let dy = ((outer_pos.y - inner_pos.y) as f64 / scale).round() as i32;
-    let dw = ((outer_size.width as f64 - inner_size.width as f64) / scale).round() as i32;
-    let dh = ((outer_size.height as f64 - inner_size.height as f64) / scale).round() as i32;
-    (dx, dy, dw, dh)
+/// 折叠条的几何一律用**逻辑坐标**（= 去掉留边后的内容矩形），
+/// 写回窗口时再换算成外框；留边是我们自己定的常量，不必运行时测量。
+fn shadow_delta() -> (i32, i32, i32, i32) {
+    (-SHADOW_PAD, -SHADOW_PAD, SHADOW_PAD * 2, SHADOW_PAD * 2)
 }
 
+/// 窗口外框（含留边）换算成逻辑内容矩形。
 pub fn current_bar_rect(window: &WebviewWindow) -> Option<Rect> {
     let scale = window.scale_factor().ok()?;
     let pos = window.inner_position().ok()?.to_logical::<f64>(scale);
     let size = window.inner_size().ok()?.to_logical::<f64>(scale);
-    Some(Rect {
-        x: pos.x.round() as i32,
-        y: pos.y.round() as i32,
-        w: size.width.round() as i32,
-        h: size.height.round() as i32,
-    })
+    let (x, y, w, h) = inner_rect(
+        pos.x.round() as i32,
+        pos.y.round() as i32,
+        size.width.round() as i32,
+        size.height.round() as i32,
+    );
+    Some(Rect { x, y, w, h })
 }
 
 pub fn apply_position(window: &WebviewWindow, x: i32, y: i32) {
-    // set_position 收的是外框位置；client.x = outer.x - dx（dx = outer - inner，通常 -8）。
-    let (dx, dy, _, _) = shadow_delta(window);
+    // set_position 收的是外框位置；外框左上 = 逻辑左上 - 留边。
+    let (dx, dy, _, _) = shadow_delta();
     let _ = window.set_position(Position::Logical(tauri::LogicalPosition::new(
         (x + dx) as f64,
         (y + dy) as f64,
@@ -79,9 +90,10 @@ pub fn apply_position(window: &WebviewWindow, x: i32, y: i32) {
 }
 
 pub fn apply_size(window: &WebviewWindow, w: i32, h: i32) {
-    // Tauri 的 set_size 收的是客户区尺寸（tauri.conf 的 width/height 同理），无需阴影补偿。
+    // set_size 收的是内容尺寸，须把四周留边加回去（CSS 只画 w×h 的那块）。
+    let (ow, oh) = outer_size(w, h);
     let _ = window.set_size(Size::Logical(tauri::LogicalSize::new(
-        w as f64, h as f64,
+        ow as f64, oh as f64,
     )));
 }
 
@@ -167,4 +179,43 @@ pub fn bar_rect_while_open(window: &WebviewWindow, previous: Rect) -> Option<Rec
         w: BAR_W,
         h: BAR_H,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 逻辑尺寸换算成外框尺寸时，四周各加一圈留边。
+    #[test]
+    fn test_outer_size_adds_padding_on_all_sides() {
+        assert_eq!(outer_size(BAR_W, BAR_H), (372, 96));
+        assert_eq!(outer_size(BAR_W, PANEL_H), (372, 472));
+    }
+
+    /// 逻辑位置换算成外框位置时，左上各减一圈留边。
+    #[test]
+    fn test_outer_position_subtracts_padding() {
+        assert_eq!(outer_position(100, 200), (84, 184));
+        assert_eq!(outer_position(0, 0), (-16, -16));
+    }
+
+    /// 外框矩形换回逻辑矩形后，应与最初传入的逻辑值一致（往返无损）。
+    #[test]
+    fn test_inner_rect_roundtrips_with_outer_helpers() {
+        let (ox, oy) = outer_position(1234, 952);
+        let (ow, oh) = outer_size(BAR_W, BAR_H);
+        assert_eq!(
+            inner_rect(ox, oy, ow, oh),
+            (1234, 952, BAR_W, BAR_H)
+        );
+    }
+
+    /// 副屏负坐标同样要正确（漏减留边会让窗口整体偏移）。
+    #[test]
+    fn test_outer_helpers_handle_negative_coordinates() {
+        let (ox, oy) = outer_position(-1920, -40);
+        assert_eq!((ox, oy), (-1936, -56));
+        let (ow, oh) = outer_size(BAR_W, BAR_H);
+        assert_eq!(inner_rect(ox, oy, ow, oh), (-1920, -40, BAR_W, BAR_H));
+    }
 }
