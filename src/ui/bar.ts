@@ -72,6 +72,7 @@ export function mountBar(root: HTMLElement): BarHandle {
       <button class="icon-btn" type="button" data-act="prev" title="上一台" aria-label="上一台">${icons.prev}</button>
       <button class="play-btn" type="button" data-act="play" title="播放" aria-label="播放">${icons.play}</button>
       <button class="icon-btn" type="button" data-act="next" title="下一台" aria-label="下一台">${icons.next}</button>
+      <button class="icon-btn fav-btn" type="button" data-act="favorite" title="收藏" aria-label="收藏">${icons.star}</button>
       <div class="volume-wrap">
         <button class="icon-btn" type="button" data-act="mute" title="静音" aria-label="静音">${icons.volume}</button>
         <input class="volume-slider" type="range" min="0" max="100" step="1" value="70" aria-label="音量" />
@@ -92,6 +93,7 @@ export function mountBar(root: HTMLElement): BarHandle {
   const prevBtn = element<HTMLButtonElement>(bar, '[data-act="prev"]');
   const playBtn = element<HTMLButtonElement>(bar, '[data-act="play"]');
   const nextBtn = element<HTMLButtonElement>(bar, '[data-act="next"]');
+  const favBtn = element<HTMLButtonElement>(bar, '[data-act="favorite"]');
   const muteBtn = element<HTMLButtonElement>(bar, '[data-act="mute"]');
   const volumeWrap = element<HTMLDivElement>(bar, ".volume-wrap");
   const slider = element<HTMLInputElement>(bar, ".volume-slider");
@@ -157,6 +159,15 @@ export function mountBar(root: HTMLElement): BarHandle {
     prevBtn.disabled = !state.canPrev;
     nextBtn.disabled = !state.canNext;
 
+    const favId = state.current?.id;
+    const isFav = !!favId && state.favoriteIds.includes(favId);
+    favBtn.disabled = !favId;
+    favBtn.innerHTML = isFav ? icons["star-filled"] : icons.star;
+    favBtn.title = isFav ? "取消收藏" : "收藏";
+    favBtn.setAttribute("aria-label", isFav ? "取消收藏" : "收藏");
+    favBtn.setAttribute("aria-pressed", String(isFav));
+    favBtn.classList.toggle("is-active", isFav);
+
     muteBtn.innerHTML = state.muted ? icons.muted : icons.volume;
     muteBtn.title = state.muted ? "取消静音" : "静音";
     muteBtn.setAttribute("aria-label", state.muted ? "取消静音" : "静音");
@@ -204,6 +215,9 @@ export function mountBar(root: HTMLElement): BarHandle {
         break;
       case "next":
         run(ipc.next());
+        break;
+      case "favorite":
+        if (state?.current) run(ipc.toggleFavorite(state.current.id));
         break;
       case "mute":
         run(ipc.toggleMute());
