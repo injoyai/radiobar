@@ -327,7 +327,10 @@ export function mountPanel(root: HTMLElement): PanelHandle {
     currentState = state;
     panel.hidden = !state.panelOpen;
 
-    const sig = `${state.filter.query}\u0000${state.filter.country ?? ""}`;
+    // scope 决定后端返回哪个集合；收藏范围内取消收藏也要让该行立刻消失，
+    // 所以把收藏 id 一并纳入签名（仅收藏范围需要，其它范围不必因收藏变动重排列表）。
+    const favSig = state.scope === "favorites" ? state.favoriteIds.join(",") : "";
+    const sig = `${state.filter.query}\u0000${state.filter.country ?? ""}\u0000${state.scope}\u0000${favSig}`;
     const filterChanged = sig !== filterSig;
     filterSig = sig;
     if (document.activeElement !== searchInput && !searchDirty) {

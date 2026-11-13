@@ -108,6 +108,14 @@ impl AppCore {
     }
 
     pub fn search(&self, offset: usize, limit: usize) -> SearchPage {
+        if self.persisted.scope == Scope::Favorites {
+            return self.library.search_favorites(
+                &self.persisted.filter,
+                &self.persisted.favorites,
+                offset,
+                limit,
+            );
+        }
         self.library.search(&self.persisted.filter, offset, limit)
     }
 
@@ -601,6 +609,19 @@ mod tests {
         core.play_station("b");
         assert_eq!(core.ui_state().playback.token, t1 + 1);
         assert_eq!(core.ui_state().current.unwrap().id, "b");
+    }
+
+    #[test]
+    fn test_search_respects_favorites_scope() {
+        let mut core = core_with(Scope::All);
+        core.toggle_favorite("b");
+        let all = core.search(0, 50);
+        assert_eq!(all.total, 4);
+
+        core.set_scope(Scope::Favorites);
+        let favs = core.search(0, 50);
+        assert_eq!(favs.total, 1);
+        assert_eq!(favs.stations[0].id, "b");
     }
 
     #[test]
