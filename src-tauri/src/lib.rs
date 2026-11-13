@@ -354,7 +354,8 @@ pub fn run() {
 
             build_tray(&handle)?;
 
-            if persisted.autoplay_on_launch {
+            // 上次退出时在播放（或设置了开机自动播）则续播上次电台。
+            if persisted.autoplay_on_launch || persisted.was_playing {
                 dispatch(&handle, |core| core.toggle_play());
             }
 

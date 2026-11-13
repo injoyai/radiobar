@@ -20,6 +20,8 @@ pub struct PersistedState {
     pub filter: ListFilter,
     pub autoplay_on_launch: bool,
     pub auto_next_on_failure: bool,
+    /// 上次退出时是否正在播放；重启后据此续播（与 autoplay_on_launch 设置无关）。
+    pub was_playing: bool,
 }
 
 impl Default for PersistedState {
@@ -39,6 +41,7 @@ impl Default for PersistedState {
             filter: ListFilter::default(),
             autoplay_on_launch: false,
             auto_next_on_failure: true,
+            was_playing: false,
         }
     }
 }

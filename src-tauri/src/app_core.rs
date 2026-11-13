@@ -310,7 +310,13 @@ impl AppCore {
 
     /// 用当前范围 + 筛选 + 收藏重建队列快照；列表未变化时保留 shuffle 已播集合。
     pub fn rebuild_queue(&mut self) {
-        let current_id = self.queue.current_id().map(|s| s.to_string());
+        // 队列还没定位过（首次启动）时用持久化的上次电台补上，
+        // 否则 current 一直是 None，按播放会走 next() 跳到别的台。
+        let current_id = self
+            .queue
+            .current_id()
+            .map(|s| s.to_string())
+            .or_else(|| self.persisted.current_id.clone());
         let ids = self.library.snapshot_ids(
             self.persisted.scope,
             &self.persisted.favorites,
@@ -394,6 +400,7 @@ impl AppCore {
     fn state_effects(&mut self, persist: bool) -> Vec<CoreEffect> {
         self.persisted.current_id = self.queue.current_id().map(|s| s.to_string());
         self.persisted.history = self.queue.history().to_vec();
+        self.persisted.was_playing = self.playing;
         let mut effects = vec![
             CoreEffect::EmitState,
             CoreEffect::SetTrayTooltip(self.tray_tooltip()),
@@ -556,6 +563,33 @@ mod tests {
         core.toggle_play();
         assert!(!core.playing());
         assert_eq!(core.ui_state().playback.token, token);
+    }
+
+    #[test]
+    fn test_startup_keeps_persisted_station_when_play_pressed() {
+        let (_dir, lib) = fixture();
+        let mut persisted = PersistedState::default();
+        persisted.scope = Scope::All;
+        persisted.current_id = Some("b".to_string());
+        let mut core = AppCore::new_seeded(persisted, lib, 42);
+
+        // 界面显示的电台来自持久化；队列当前项也必须是它，
+        // 否则点播放会走 next() 换到另一台。
+        assert_eq!(core.ui_state().current.unwrap().id, "b");
+
+        core.toggle_play();
+        assert!(core.playing());
+        assert_eq!(core.ui_state().current.unwrap().id, "b");
+    }
+
+    #[test]
+    fn test_persisted_was_playing_tracks_play_state() {
+        let mut core = core_with(Scope::All);
+        assert!(!core.persisted.was_playing);
+        core.toggle_play();
+        assert!(core.persisted.was_playing);
+        core.toggle_play();
+        assert!(!core.persisted.was_playing);
     }
 
     #[test]

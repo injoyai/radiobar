@@ -2,7 +2,7 @@ import "./style.css";
 
 import { getAudioController } from "./audio";
 import { ipc, subscribe } from "./ipc";
-import { getState, setState, type UiState } from "./state";
+import { setState, type UiState } from "./state";
 import { mountBar } from "./ui/bar";
 import { mountPanel } from "./ui/panel";
 
@@ -14,12 +14,6 @@ const bar = mountBar(app);
 const panel = mountPanel(app);
 const audio = getAudioController();
 
-/**
- * 自动播放策略：启动阶段不直接 play，等用户第一次手势后再按真实
- * playing 状态同步一次音频；之后的 state-changed 正常同步。
- */
-let gestureSeen = false;
-
 function render(state: UiState): void {
   setState(state);
   // 面板朝上长时反转 DOM 顺序，折叠条才会钉在原地而不是被顶到窗口顶部。
@@ -27,27 +21,8 @@ function render(state: UiState): void {
   bar.render(state);
   panel.render(state);
   audio.updateStation(state.current);
-  audio.sync(
-    state.playback,
-    gestureSeen ? state.playing : false,
-    state.volume,
-    state.muted,
-  );
+  audio.sync(state.playback, state.playing, state.volume, state.muted);
 }
-
-function onFirstGesture(): void {
-  if (gestureSeen) return;
-  gestureSeen = true;
-  document.removeEventListener("pointerdown", onFirstGesture, true);
-  document.removeEventListener("keydown", onFirstGesture, true);
-  const state = getState();
-  if (state) {
-    audio.sync(state.playback, state.playing, state.volume, state.muted);
-  }
-}
-
-document.addEventListener("pointerdown", onFirstGesture, true);
-document.addEventListener("keydown", onFirstGesture, true);
 
 async function boot(): Promise<void> {
   try {
