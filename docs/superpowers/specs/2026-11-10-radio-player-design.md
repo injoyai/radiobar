@@ -1,4 +1,4 @@
-﻿# 电台播放器（桌面电台条）设计文档
+# 电台播放器（桌面电台条）设计文档
 
 - 日期：2026-11-10
 - 状态：待用户确认（确认后进入计划阶段）
@@ -249,7 +249,7 @@ TypeScript + CSS，避免前端框架体积。
   `serde`/`serde_json`、`reqwest`（`rustls-tls`，避免 schannel 问题）、`tokio`、`rand`、
   `thiserror`；Windows 工作区/置顶细节用 `windows` crate（`Win32_UI_WindowsAndMessaging`）。
 - 前端：`vite` + `typescript` + `hls.js`，无框架；测试用 `vitest`（只测纯函数）。
-- 打包：Tauri `nsis` 安装包 + 免安装 `radiobar.exe`；`identifier: com.local.radiobar`。
+- 打包：只交付免安装 `radiobar.exe`（`bundle.active: false`，不产出安装包，2026-11-17 按用户要求改为唯一形态）；`identifier: com.local.radiobar`。
 - 图标：先用 Pillow/Node 生成 1024 px 母图（青绿波形 + 圆角方块），`tauri icon` 生成全尺寸。
 - 版本控制：`git init`，`main` 分支，第一个提交是设计文档与脚手架。
 

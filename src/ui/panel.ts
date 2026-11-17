@@ -1,8 +1,10 @@
 import { ipc } from "../ipc";
 import {
   getState,
+  SHORTCUT_LABELS,
   type CountryInfo,
   type SettingKey,
+  type ShortcutAction,
   type Station,
   type SyncProgress,
   type ToastPayload,
@@ -18,6 +20,44 @@ export interface PanelHandle {
 }
 
 const PAGE_SIZE = 50;
+
+const SHORTCUT_ORDER: ShortcutAction[] = ["prev", "next", "volumeUp", "volumeDown", "playPause"];
+
+const MODIFIER_LABEL: Record<string, string> = {
+  control: "Ctrl",
+  ctrl: "Ctrl",
+  alt: "Alt",
+  shift: "Shift",
+  super: "Win",
+  meta: "Win",
+  cmd: "Win",
+};
+
+const KEY_LABEL: Record<string, string> = {
+  arrowleft: "←",
+  arrowright: "→",
+  arrowup: "↑",
+  arrowdown: "↓",
+  space: "空格",
+  enter: "回车",
+};
+
+/** `"control+ArrowLeft"` → `"Ctrl + ←"`，纯展示用。 */
+function formatAccel(accel: string | undefined): string {
+  if (!accel) return "未设置";
+  return accel
+    .split("+")
+    .filter((part) => part !== "")
+    .map((part) => {
+      const lower = part.toLowerCase();
+      if (MODIFIER_LABEL[lower]) return MODIFIER_LABEL[lower];
+      if (KEY_LABEL[lower]) return KEY_LABEL[lower];
+      if (lower.startsWith("key") && part.length === 4) return part.slice(3).toUpperCase();
+      if (lower.startsWith("digit") && part.length === 6) return part.slice(5);
+      return part.toUpperCase();
+    })
+    .join(" + ");
+}
 
 function element<T extends Element>(root: ParentNode, selector: string): T {
   const found = root.querySelector<T>(selector);
@@ -88,6 +128,9 @@ export function mountPanel(root: HTMLElement): PanelHandle {
         </span>
         <input class="setting-check" type="checkbox" data-setting="autoNextOnFailure" />
       </label>
+      <div class="settings-section-title">快捷键</div>
+      <div class="shortcut-list"></div>
+      <p class="settings-note">点击键位后按下新的组合键，Esc 取消。</p>
     </div>
   `;
 
@@ -105,6 +148,27 @@ export function mountPanel(root: HTMLElement): PanelHandle {
   const syncLabel = element<HTMLSpanElement>(panel, ".sync-label");
   const autoplayCheck = element<HTMLInputElement>(panel, '[data-setting="autoplayOnLaunch"]');
   const autoNextCheck = element<HTMLInputElement>(panel, '[data-setting="autoNextOnFailure"]');
+  const shortcutList = element<HTMLDivElement>(panel, ".shortcut-list");
+  const shortcutButtons = new Map<ShortcutAction, HTMLButtonElement>();
+  const shortcutRows = new Map<ShortcutAction, HTMLDivElement>();
+
+  // 键位行固定 5 条，先在 DOM 里建好，之后只改文字。
+  for (const action of SHORTCUT_ORDER) {
+    const row = document.createElement("div");
+    row.className = "shortcut-row";
+    const name = document.createElement("span");
+    name.className = "shortcut-name";
+    name.textContent = SHORTCUT_LABELS[action];
+    const button = document.createElement("button");
+    button.className = "shortcut-btn";
+    button.type = "button";
+    button.dataset.shortcut = action;
+    button.textContent = "未设置";
+    row.append(name, button);
+    shortcutList.appendChild(row);
+    shortcutRows.set(action, row);
+    shortcutButtons.set(action, button);
+  }
 
   let currentState: UiState | null = null;
   let countries: CountryInfo[] = [];
@@ -122,10 +186,78 @@ export function mountPanel(root: HTMLElement): PanelHandle {
   let view: "browse" | "settings" = "browse";
   let syncing = false;
   let syncText = "";
+  /** 正在录制的动作；null 表示未在录制。 */
+  let capturing: ShortcutAction | null = null;
 
   function applyView(): void {
+    if (view !== "settings") stopCapture();
     browseView.hidden = view !== "browse";
     settingsView.hidden = view !== "settings";
+  }
+
+  function renderShortcuts(state: UiState | null): void {
+    for (const action of SHORTCUT_ORDER) {
+      const button = shortcutButtons.get(action);
+      const row = shortcutRows.get(action);
+      if (!button || !row) continue;
+      const isCapturing = capturing === action;
+      button.classList.toggle("is-capturing", isCapturing);
+      row.classList.toggle("is-capturing", isCapturing);
+      button.textContent = isCapturing
+        ? "按下组合键…"
+        : formatAccel(state?.shortcuts?.[action]);
+    }
+  }
+
+  function stopCapture(): void {
+    if (capturing === null) return;
+    capturing = null;
+    window.removeEventListener("keydown", onCaptureKey, true);
+    // 只恢复全局热键；若刚才已成功改绑，setShortcut 自己会装好新表。
+    run(ipc.setShortcutCapture(false));
+    renderShortcuts(currentState);
+  }
+
+  function startCapture(action: ShortcutAction): void {
+    if (capturing === action) {
+      stopCapture();
+      return;
+    }
+    // 换目标时只清本地监听，不必再跑一次 IPC（全局键本来就处于释放状态）。
+    if (capturing !== null) {
+      window.removeEventListener("keydown", onCaptureKey, true);
+    }
+    capturing = action;
+    // 不先释放全局热键，按下的组合会被系统吞掉，页面根本收不到 keydown。
+    run(ipc.setShortcutCapture(true));
+    window.addEventListener("keydown", onCaptureKey, true);
+    renderShortcuts(currentState);
+  }
+
+  function onCaptureKey(event: KeyboardEvent): void {
+    const action = capturing;
+    if (action === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === "Escape") {
+      stopCapture();
+      return;
+    }
+    // 只按修饰键时继续等待主键。
+    if (["Control", "Alt", "Shift", "Meta", "OS"].includes(event.key)) return;
+
+    const parts: string[] = [];
+    if (event.ctrlKey) parts.push("control");
+    if (event.altKey) parts.push("alt");
+    if (event.shiftKey) parts.push("shift");
+    if (event.metaKey) parts.push("super");
+    if (parts.length === 0) return;
+
+    parts.push(event.code);
+    capturing = null;
+    window.removeEventListener("keydown", onCaptureKey, true);
+    run(ipc.setShortcut(action, parts.join("+")));
+    renderShortcuts(currentState);
   }
 
   function updateFooter(): void {
@@ -362,6 +494,7 @@ export function mountPanel(root: HTMLElement): PanelHandle {
 
     autoplayCheck.checked = state.autoplayOnLaunch;
     autoNextCheck.checked = state.autoNextOnFailure;
+    renderShortcuts(state);
 
     applyView();
     updateSyncButton();
@@ -371,7 +504,14 @@ export function mountPanel(root: HTMLElement): PanelHandle {
   }
 
   panel.addEventListener("click", (event) => {
-    const target = (event.target as Element).closest<HTMLElement>("[data-act]");
+    const target = (event.target as Element).closest<HTMLElement>("[data-act], [data-shortcut]");
+    const shortcut = target?.dataset.shortcut as ShortcutAction | undefined;
+    if (shortcut) {
+      startCapture(shortcut);
+      return;
+    }
+    // 点了别处就放弃录制，否则全局热键会一直处于释放状态。
+    stopCapture();
     if (!target) return;
     switch (target.dataset.act) {
       case "close":
@@ -447,6 +587,11 @@ export function mountPanel(root: HTMLElement): PanelHandle {
     if (key === "autoplayOnLaunch" || key === "autoNextOnFailure") {
       run(ipc.setSetting(key, input.checked));
     }
+  });
+
+  // 窗口失焦（比如点了别的程序）也放弃录制，避免热键永久失效。
+  window.addEventListener("blur", () => {
+    stopCapture();
   });
 
   root.appendChild(panel);

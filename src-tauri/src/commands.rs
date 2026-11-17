@@ -74,6 +74,35 @@ pub fn set_setting(app: AppHandle, key: String, value: bool) {
     dispatch(&app, move |core| core.set_setting(&key, value));
 }
 
+/// 改绑一个动作。注册要跳主线程并阻塞，放到后台线程做，避免卡住 IPC。
+#[tauri::command]
+pub fn set_shortcut(app: AppHandle, action: String, accel: String) {
+    let handle = app.clone();
+    std::thread::spawn(move || match crate::shortcuts::rebind(&handle, &action, &accel) {
+        Ok(map) => {
+            dispatch(&handle, move |core| core.set_shortcuts(map));
+        }
+        Err(message) => {
+            // 录制期间全局键被释放过，失败时按旧表装回去，否则热键从此失效。
+            crate::shortcuts::restore(&handle);
+            let _ = handle.emit("toast", serde_json::json!({ "level": "warn", "text": message }));
+        }
+    });
+}
+
+/// 录制改键期间释放全局键，否则系统会吞掉按键，设置页收不到 keydown。
+#[tauri::command]
+pub fn set_shortcut_capture(app: AppHandle, active: bool) {
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        if active {
+            crate::shortcuts::suspend(&handle);
+        } else {
+            crate::shortcuts::restore(&handle);
+        }
+    });
+}
+
 #[tauri::command]
 pub fn search_stations(state: State<'_, AppState>, offset: usize, limit: usize) -> SearchPage {
     let limit = limit.min(100);

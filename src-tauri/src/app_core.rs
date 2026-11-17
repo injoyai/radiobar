@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
@@ -104,6 +106,7 @@ impl AppCore {
             autoplay_on_launch: self.persisted.autoplay_on_launch,
             auto_next_on_failure: self.persisted.auto_next_on_failure,
             panel_grows_up: self.panel_grows_up,
+            shortcuts: self.persisted.shortcuts.clone(),
         }
     }
 
@@ -186,6 +189,12 @@ impl AppCore {
             "autoNextOnFailure" => self.persisted.auto_next_on_failure = value,
             _ => return self.toast(ToastLevel::Warn, "未知设置项"),
         }
+        self.state_effects(true)
+    }
+
+    /// 改键成功后落盘新的完整键位表（注册动作由 shortcuts 模块负责）。
+    pub fn set_shortcuts(&mut self, map: BTreeMap<String, String>) -> Vec<CoreEffect> {
+        self.persisted.shortcuts = map;
         self.state_effects(true)
     }
 

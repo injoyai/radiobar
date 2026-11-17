@@ -97,7 +97,53 @@ pub fn apply_size(window: &WebviewWindow, w: i32, h: i32) {
     )));
 }
 
+/// 一次调用同时写尺寸与位置。
+///
+/// tao 的 `set_inner_size` / `set_outer_position` 各派发一条独立的主线程消息
+/// （见 tao-0.37.2 `platform_impl/windows/window.rs` 的 `SetWindowPos` 调用），
+/// 中间必然存在「新高度 + 旧位置」的一帧，展开/收起面板时会闪一下。Tauri 的
+/// `Window` 没有合成两者的 API，只能自己发一条 `SetWindowPos`。
+#[cfg(windows)]
+pub fn apply_frame(window: &WebviewWindow, rect: Rect) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOZORDER,
+    };
+
+    let (Ok(scale), Ok(hwnd)) = (window.scale_factor(), window.hwnd()) else {
+        return;
+    };
+    let (ox, oy) = outer_position(rect.x, rect.y);
+    let (ow, oh) = outer_size(rect.w, rect.h);
+    let px = |v: i32| (v as f64 * scale).round() as i32;
+    // tauri 依赖的是 windows 0.62，本项目是 0.58，HWND 只是结构体包装，直接转。
+    let hwnd = HWND(hwnd.0);
+    unsafe {
+        let _ = SetWindowPos(
+            hwnd,
+            None::<&HWND>,
+            px(ox),
+            px(oy),
+            px(ow),
+            px(oh),
+            // 跨线程调用必须 ASYNC，否则会阻塞在窗口线程的消息循环上。
+            SWP_ASYNCWINDOWPOS | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+pub fn apply_frame(window: &WebviewWindow, rect: Rect) {
+    let _ = window.set_size(Size::Logical(tauri::LogicalSize::new(
+        outer_size(rect.w, rect.h).0 as f64,
+        outer_size(rect.w, rect.h).1 as f64,
+    )));
+    apply_position(window, rect.x, rect.y);
+}
+
 /// 启动时决定折叠条位置：记忆位置在任一屏幕可见则沿用，否则主屏右下角（留 24px 边距）。
+/// 沿用前先按该屏工作区吸附一次：历史上拖动吸顶会把逻辑 y 停在 SHADOW_PAD（外框被系统
+/// 钳在屏幕顶），若原样恢复就会一直留一条 16px 缝隙。
 pub fn initial_bar_rect(window: &WebviewWindow, saved: Option<(i32, i32)>) -> Rect {
     let works = work_rects(window);
     if let Some((x, y)) = saved {
@@ -107,8 +153,8 @@ pub fn initial_bar_rect(window: &WebviewWindow, saved: Option<(i32, i32)>) -> Re
             w: BAR_W,
             h: BAR_H,
         };
-        if is_visible_on(rect, &works) {
-            return rect;
+        if let Some(work) = works.iter().copied().find(|w| is_visible_on(rect, &[*w])) {
+            return snap_bar(rect, work);
         }
     }
     let work = works
@@ -126,17 +172,6 @@ pub fn initial_bar_rect(window: &WebviewWindow, saved: Option<(i32, i32)>) -> Re
         w: BAR_W,
         h: BAR_H,
     }
-}
-
-/// 折叠条移动后贴边；返回新的 canonical 折叠条位置。
-pub fn snap_bar_window(window: &WebviewWindow) -> Option<Rect> {
-    let bar = current_bar_rect(window)?;
-    let work = current_work_rect(window)?;
-    let snapped = snap_bar(bar, work);
-    if snapped.x != bar.x || snapped.y != bar.y {
-        apply_position(window, snapped.x, snapped.y);
-    }
-    Some(snapped)
 }
 
 /// 展开 / 收起面板；返回 canonical 折叠条位置与本次展开方向（朝上为 true）。
@@ -158,34 +193,53 @@ pub fn apply_panel(window: &WebviewWindow, bar: Rect, open: bool) -> (Rect, bool
                 work,
                 PANEL_H,
             );
-            apply_size(window, BAR_W, expanded.h);
-            apply_position(window, expanded.x, expanded.y);
+            apply_frame(window, expanded);
         } else {
             apply_size(window, BAR_W, PANEL_H);
         }
         (bar, grows_up)
     } else {
-        apply_size(window, BAR_W, BAR_H);
-        apply_position(window, bar.x, bar.y);
+        apply_frame(
+            window,
+            Rect {
+                w: BAR_W,
+                h: BAR_H,
+                ..bar
+            },
+        );
         (bar, false)
     }
 }
 
-/// 面板展开时窗口被拖动：由窗口矩形反推折叠条矩形。
-pub fn bar_rect_while_open(window: &WebviewWindow, previous: Rect) -> Option<Rect> {
+/// 面板展开时窗口被拖动：由窗口矩形与展开方向反推折叠条矩形。
+/// 方向必须用 `AppCore::panel_grows_up` 这个权威值，不能从「上次条位置」猜：
+/// 面板开着拖动时窗口矩形每帧都在变，猜出来的方向会错，反推出的条位置也就错了。
+pub fn bar_rect_while_open(window: &WebviewWindow, grows_up: bool) -> Option<Rect> {
     let rect = current_bar_rect(window)?;
-    let grew_up = previous.y + BAR_H <= rect.y + rect.h && previous.y != rect.y;
-    let y = if grew_up {
+    Some(bar_rect_from_window(rect, grows_up))
+}
+
+/// 展开方向决定条贴窗口顶（向下长）还是贴窗口底（向上长）。
+fn bar_rect_from_window(rect: Rect, grows_up: bool) -> Rect {
+    let y = if grows_up {
         rect.y + rect.h - BAR_H
     } else {
         rect.y
     };
-    Some(Rect {
+    Rect {
         x: rect.x,
         y,
         w: BAR_W,
         h: BAR_H,
-    })
+    }
+}
+
+/// 按窗口所在屏的工作区吸附；取不到工作区时原样返回。
+pub fn snap_bar_to_work(window: &WebviewWindow, bar: Rect) -> Rect {
+    match current_work_rect(window) {
+        Some(work) => snap_bar(bar, work),
+        None => bar,
+    }
 }
 
 #[cfg(test)]
@@ -215,6 +269,12 @@ mod tests {
             inner_rect(ox, oy, ow, oh),
             (1234, 952, BAR_W, BAR_H)
         );
+    }
+
+    /// 吸附阈值必须大于留边，否则拖动吸顶（逻辑 y 最低只能到 SHADOW_PAD）永远吸不上。
+    #[test]
+    fn test_snap_threshold_covers_shadow_pad() {
+        assert!(crate::snap::SNAP_THRESHOLD > SHADOW_PAD);
     }
 
     /// 副屏负坐标同样要正确（漏减留边会让窗口整体偏移）。

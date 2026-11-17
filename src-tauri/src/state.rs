@@ -1,6 +1,9 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::model::{ListFilter, PlayMode, Scope, Station};
+use crate::shortcuts;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
@@ -22,6 +25,8 @@ pub struct PersistedState {
     pub auto_next_on_failure: bool,
     /// 上次退出时是否正在播放；重启后据此续播（与 autoplay_on_launch 设置无关）。
     pub was_playing: bool,
+    /// 动作 id -> 组合键（形如 `control+ArrowLeft`）。缺省即快捷键模块的默认键位。
+    pub shortcuts: BTreeMap<String, String>,
 }
 
 impl Default for PersistedState {
@@ -42,6 +47,7 @@ impl Default for PersistedState {
             autoplay_on_launch: false,
             auto_next_on_failure: true,
             was_playing: false,
+            shortcuts: shortcuts::defaults(),
         }
     }
 }
@@ -74,6 +80,8 @@ pub struct UiState {
     pub auto_next_on_failure: bool,
     /// 面板展开时朝上长（折叠条贴近工作区下部）；前端据此反转顺序，让条子钉在原地。
     pub panel_grows_up: bool,
+    /// 动作 id -> 组合键，供设置页展示与录制改键。
+    pub shortcuts: BTreeMap<String, String>,
 }
 
 #[cfg(test)]
@@ -93,6 +101,7 @@ mod tests {
         assert_eq!(s.scope, Scope::All);
         assert!(s.favorites.is_empty());
         assert!(s.history.is_empty());
+        assert_eq!(s.shortcuts["prev"], "control+ArrowLeft");
     }
 
     #[test]
