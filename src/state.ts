@@ -44,6 +44,10 @@ export interface UiState {
   canPrev: boolean;
   autoplayOnLaunch: boolean;
   autoNextOnFailure: boolean;
+  /** 面板展开时朝上长；前端据此反转 DOM 顺序，让折叠条钉在原地。 */
+  panelGrowsUp: boolean;
+  /** 动作 id -> 组合键，如 `{ prev: "control+ArrowLeft" }`。 */
+  shortcuts: Record<string, string>;
 }
 
 export interface CountryInfo {
@@ -72,6 +76,17 @@ export interface SyncProgress {
 }
 
 export type SettingKey = "autoplayOnLaunch" | "autoNextOnFailure";
+
+/** 可改键的动作，顺序即设置页展示顺序。 */
+export type ShortcutAction = "prev" | "next" | "volumeUp" | "volumeDown" | "playPause";
+
+export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
+  prev: "上一个电台",
+  next: "下一个电台",
+  volumeUp: "音量 +",
+  volumeDown: "音量 −",
+  playPause: "播放 / 暂停",
+};
 
 let latestState: UiState | null = null;
 

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
@@ -32,6 +34,8 @@ pub struct AppCore {
     consecutive_failures: u32,
     try_original_url: bool,
     rng: StdRng,
+    /// 上次 `apply_panel` 判定的展开方向（由窗口层回写，供前端决定 DOM 顺序）。
+    pub panel_grows_up: bool,
 }
 
 impl AppCore {
@@ -51,6 +55,7 @@ impl AppCore {
             consecutive_failures: 0,
             try_original_url: false,
             rng: StdRng::seed_from_u64(seed),
+            panel_grows_up: false,
         };
         core.rebuild_queue();
         core
@@ -100,10 +105,20 @@ impl AppCore {
             can_prev: self.can_step(false),
             autoplay_on_launch: self.persisted.autoplay_on_launch,
             auto_next_on_failure: self.persisted.auto_next_on_failure,
+            panel_grows_up: self.panel_grows_up,
+            shortcuts: self.persisted.shortcuts.clone(),
         }
     }
 
     pub fn search(&self, offset: usize, limit: usize) -> SearchPage {
+        if self.persisted.scope == Scope::Favorites {
+            return self.library.search_favorites(
+                &self.persisted.filter,
+                &self.persisted.favorites,
+                offset,
+                limit,
+            );
+        }
         self.library.search(&self.persisted.filter, offset, limit)
     }
 
@@ -174,6 +189,12 @@ impl AppCore {
             "autoNextOnFailure" => self.persisted.auto_next_on_failure = value,
             _ => return self.toast(ToastLevel::Warn, "未知设置项"),
         }
+        self.state_effects(true)
+    }
+
+    /// 改键成功后落盘新的完整键位表（注册动作由 shortcuts 模块负责）。
+    pub fn set_shortcuts(&mut self, map: BTreeMap<String, String>) -> Vec<CoreEffect> {
+        self.persisted.shortcuts = map;
         self.state_effects(true)
     }
 
@@ -306,7 +327,13 @@ impl AppCore {
 
     /// 用当前范围 + 筛选 + 收藏重建队列快照；列表未变化时保留 shuffle 已播集合。
     pub fn rebuild_queue(&mut self) {
-        let current_id = self.queue.current_id().map(|s| s.to_string());
+        // 队列还没定位过（首次启动）时用持久化的上次电台补上，
+        // 否则 current 一直是 None，按播放会走 next() 跳到别的台。
+        let current_id = self
+            .queue
+            .current_id()
+            .map(|s| s.to_string())
+            .or_else(|| self.persisted.current_id.clone());
         let ids = self.library.snapshot_ids(
             self.persisted.scope,
             &self.persisted.favorites,
@@ -390,6 +417,7 @@ impl AppCore {
     fn state_effects(&mut self, persist: bool) -> Vec<CoreEffect> {
         self.persisted.current_id = self.queue.current_id().map(|s| s.to_string());
         self.persisted.history = self.queue.history().to_vec();
+        self.persisted.was_playing = self.playing;
         let mut effects = vec![
             CoreEffect::EmitState,
             CoreEffect::SetTrayTooltip(self.tray_tooltip()),
@@ -463,6 +491,16 @@ mod tests {
             CoreEffect::Toast { text, .. } => Some(text.clone()),
             _ => None,
         })
+    }
+
+    #[test]
+    fn test_ui_state_reports_panel_grows_up() {
+        let mut core = core_with(Scope::All);
+        assert!(!core.ui_state().panel_grows_up);
+        core.panel_grows_up = true;
+        assert!(core.ui_state().panel_grows_up);
+        core.panel_grows_up = false;
+        assert!(!core.ui_state().panel_grows_up);
     }
 
     #[test]
@@ -545,6 +583,33 @@ mod tests {
     }
 
     #[test]
+    fn test_startup_keeps_persisted_station_when_play_pressed() {
+        let (_dir, lib) = fixture();
+        let mut persisted = PersistedState::default();
+        persisted.scope = Scope::All;
+        persisted.current_id = Some("b".to_string());
+        let mut core = AppCore::new_seeded(persisted, lib, 42);
+
+        // 界面显示的电台来自持久化；队列当前项也必须是它，
+        // 否则点播放会走 next() 换到另一台。
+        assert_eq!(core.ui_state().current.unwrap().id, "b");
+
+        core.toggle_play();
+        assert!(core.playing());
+        assert_eq!(core.ui_state().current.unwrap().id, "b");
+    }
+
+    #[test]
+    fn test_persisted_was_playing_tracks_play_state() {
+        let mut core = core_with(Scope::All);
+        assert!(!core.persisted.was_playing);
+        core.toggle_play();
+        assert!(core.persisted.was_playing);
+        core.toggle_play();
+        assert!(!core.persisted.was_playing);
+    }
+
+    #[test]
     fn test_play_station_sets_playing_and_token_increments() {
         let mut core = core_with(Scope::All);
         core.play_station("c");
@@ -553,6 +618,19 @@ mod tests {
         core.play_station("b");
         assert_eq!(core.ui_state().playback.token, t1 + 1);
         assert_eq!(core.ui_state().current.unwrap().id, "b");
+    }
+
+    #[test]
+    fn test_search_respects_favorites_scope() {
+        let mut core = core_with(Scope::All);
+        core.toggle_favorite("b");
+        let all = core.search(0, 50);
+        assert_eq!(all.total, 4);
+
+        core.set_scope(Scope::Favorites);
+        let favs = core.search(0, 50);
+        assert_eq!(favs.total, 1);
+        assert_eq!(favs.stations[0].id, "b");
     }
 
     #[test]

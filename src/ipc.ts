@@ -8,6 +8,7 @@ import type {
   Scope,
   SearchPage,
   SettingKey,
+  ShortcutAction,
   SyncProgress,
   ToastPayload,
   UiState,
@@ -29,6 +30,11 @@ export const ipc = {
   setFilter: (filter: ListFilter) => invoke<void>("set_filter", { filter }),
   setSetting: (key: SettingKey, value: boolean) =>
     invoke<void>("set_setting", { key, value }),
+  setShortcut: (action: ShortcutAction, accel: string) =>
+    invoke<void>("set_shortcut", { action, accel }),
+  /** 录制改键期间释放全局热键，否则按键被系统吞掉，页面收不到 keydown。 */
+  setShortcutCapture: (active: boolean) =>
+    invoke<void>("set_shortcut_capture", { active }),
   searchStations: (offset: number, limit: number) =>
     invoke<SearchPage>("search_stations", { offset, limit }),
   getCountries: () => invoke<CountryInfo[]>("get_countries"),

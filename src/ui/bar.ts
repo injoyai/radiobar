@@ -72,13 +72,14 @@ export function mountBar(root: HTMLElement): BarHandle {
       <button class="icon-btn" type="button" data-act="prev" title="上一台" aria-label="上一台">${icons.prev}</button>
       <button class="play-btn" type="button" data-act="play" title="播放" aria-label="播放">${icons.play}</button>
       <button class="icon-btn" type="button" data-act="next" title="下一台" aria-label="下一台">${icons.next}</button>
+      <button class="icon-btn fav-btn" type="button" data-act="favorite" title="收藏" aria-label="收藏">${icons.star}</button>
       <div class="volume-wrap">
         <button class="icon-btn" type="button" data-act="mute" title="静音" aria-label="静音">${icons.volume}</button>
         <input class="volume-slider" type="range" min="0" max="100" step="1" value="70" aria-label="音量" />
       </div>
       <button class="icon-btn" type="button" data-act="scope" title="切换范围" aria-label="切换范围">${icons.list}</button>
       <button class="icon-btn" type="button" data-act="mode" title="切换模式" aria-label="切换模式">${icons["mode-sequential"]}</button>
-      <button class="icon-btn" type="button" data-act="panel" title="打开面板" aria-label="打开面板">${icons.list}</button>
+      <button class="icon-btn" type="button" data-act="panel" title="展开面板" aria-label="展开面板">${icons["panel-toggle"]}</button>
       <button class="icon-btn pin-btn" type="button" data-act="pin" title="置顶" aria-label="置顶">${icons.pin}</button>
     </div>
   `;
@@ -92,11 +93,13 @@ export function mountBar(root: HTMLElement): BarHandle {
   const prevBtn = element<HTMLButtonElement>(bar, '[data-act="prev"]');
   const playBtn = element<HTMLButtonElement>(bar, '[data-act="play"]');
   const nextBtn = element<HTMLButtonElement>(bar, '[data-act="next"]');
+  const favBtn = element<HTMLButtonElement>(bar, '[data-act="favorite"]');
   const muteBtn = element<HTMLButtonElement>(bar, '[data-act="mute"]');
   const volumeWrap = element<HTMLDivElement>(bar, ".volume-wrap");
   const slider = element<HTMLInputElement>(bar, ".volume-slider");
   const scopeBtn = element<HTMLButtonElement>(bar, '[data-act="scope"]');
   const modeBtn = element<HTMLButtonElement>(bar, '[data-act="mode"]');
+  const panelBtn = element<HTMLButtonElement>(bar, '[data-act="panel"]');
   const pinBtn = element<HTMLButtonElement>(bar, '[data-act="pin"]');
 
   const toast = document.createElement("div");
@@ -156,6 +159,15 @@ export function mountBar(root: HTMLElement): BarHandle {
     prevBtn.disabled = !state.canPrev;
     nextBtn.disabled = !state.canNext;
 
+    const favId = state.current?.id;
+    const isFav = !!favId && state.favoriteIds.includes(favId);
+    favBtn.disabled = !favId;
+    favBtn.innerHTML = isFav ? icons["star-filled"] : icons.star;
+    favBtn.title = isFav ? "取消收藏" : "收藏";
+    favBtn.setAttribute("aria-label", isFav ? "取消收藏" : "收藏");
+    favBtn.setAttribute("aria-pressed", String(isFav));
+    favBtn.classList.toggle("is-active", isFav);
+
     muteBtn.innerHTML = state.muted ? icons.muted : icons.volume;
     muteBtn.title = state.muted ? "取消静音" : "静音";
     muteBtn.setAttribute("aria-label", state.muted ? "取消静音" : "静音");
@@ -178,6 +190,11 @@ export function mountBar(root: HTMLElement): BarHandle {
     modeBtn.setAttribute("aria-label", `切换模式，当前${modeLabel}`);
     modeBtn.dataset.mode = state.mode;
 
+    panelBtn.innerHTML = state.panelOpen ? icons.chevron : icons["panel-toggle"];
+    panelBtn.title = state.panelOpen ? "收起面板" : "展开面板";
+    panelBtn.setAttribute("aria-label", state.panelOpen ? "收起面板" : "展开面板");
+    panelBtn.setAttribute("aria-expanded", String(state.panelOpen));
+
     pinBtn.classList.toggle("is-active", state.alwaysOnTop);
     pinBtn.title = state.alwaysOnTop ? "置顶：开" : "置顶：关";
     pinBtn.setAttribute("aria-pressed", String(state.alwaysOnTop));
@@ -199,6 +216,9 @@ export function mountBar(root: HTMLElement): BarHandle {
       case "next":
         run(ipc.next());
         break;
+      case "favorite":
+        if (state?.current) run(ipc.toggleFavorite(state.current.id));
+        break;
       case "mute":
         run(ipc.toggleMute());
         break;
@@ -209,7 +229,7 @@ export function mountBar(root: HTMLElement): BarHandle {
         if (state) run(ipc.setMode(nextOf(MODE_CYCLE, state.mode)));
         break;
       case "panel":
-        run(ipc.setPanelOpen(true));
+        if (state) run(ipc.setPanelOpen(!state.panelOpen));
         break;
       case "pin":
         if (state) run(ipc.setAlwaysOnTop(!state.alwaysOnTop));
@@ -235,7 +255,7 @@ export function mountBar(root: HTMLElement): BarHandle {
 
   topRow.addEventListener("dblclick", (event) => {
     if ((event.target as Element).closest("[data-act]")) return;
-    run(ipc.setPanelOpen(true));
+    if (currentState) run(ipc.setPanelOpen(!currentState.panelOpen));
   });
 
   function showToast(payload: ToastPayload): void {

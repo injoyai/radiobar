@@ -223,6 +223,29 @@ impl Library {
         }
     }
 
+    /// 收藏页：只返回收藏里的台（叠加搜索/国家过滤），顺序按收藏添加顺序。
+    pub fn search_favorites(
+        &self,
+        filter: &ListFilter,
+        favorites: &[String],
+        offset: usize,
+        limit: usize,
+    ) -> SearchPage {
+        let matched: Vec<&Station> = favorites
+            .iter()
+            .filter_map(|id| self.get(id))
+            .filter(|st| self.matches(st, filter))
+            .collect();
+        let total = matched.len();
+        let stations = matched
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect();
+        SearchPage { total, stations }
+    }
+
     /// 列表页：包含 lastcheckok=false 的台（列表里标注「暂不可用」）。
     pub fn search(&self, filter: &ListFilter, offset: usize, limit: usize) -> SearchPage {
         let all = self.filtered_sorted(filter);
@@ -319,37 +342,40 @@ impl Library {
     }
 
     fn filtered_sorted(&self, filter: &ListFilter) -> Vec<&Station> {
-        let query = filter.query.trim().to_lowercase();
         self.sorted_all()
             .into_iter()
-            .filter(|st| {
-                if let Some(code) = filter.country.as_deref() {
-                    if st.country_code != code {
-                        return false;
-                    }
-                }
-                if query.is_empty() {
-                    return true;
-                }
-                if st.name.to_lowercase().contains(&query) {
-                    return true;
-                }
-                if st.country_code.to_lowercase().contains(&query) {
-                    return true;
-                }
-                if let Some(name) = self.zh_names.get(&st.country_code) {
-                    if name.to_lowercase().contains(&query) {
-                        return true;
-                    }
-                }
-                if let Some(name) = self.en_names.get(&st.country_code) {
-                    if name.to_lowercase().contains(&query) {
-                        return true;
-                    }
-                }
-                st.tags.iter().any(|tag| tag.to_lowercase().contains(&query))
-            })
+            .filter(|st| self.matches(st, filter))
             .collect()
+    }
+
+    /// 单台是否命中搜索词与国家过滤（列表页与收藏页共用同一判据）。
+    fn matches(&self, st: &Station, filter: &ListFilter) -> bool {
+        let query = filter.query.trim().to_lowercase();
+        if let Some(code) = filter.country.as_deref() {
+            if st.country_code != code {
+                return false;
+            }
+        }
+        if query.is_empty() {
+            return true;
+        }
+        if st.name.to_lowercase().contains(&query) {
+            return true;
+        }
+        if st.country_code.to_lowercase().contains(&query) {
+            return true;
+        }
+        if let Some(name) = self.zh_names.get(&st.country_code) {
+            if name.to_lowercase().contains(&query) {
+                return true;
+            }
+        }
+        if let Some(name) = self.en_names.get(&st.country_code) {
+            if name.to_lowercase().contains(&query) {
+                return true;
+            }
+        }
+        st.tags.iter().any(|tag| tag.to_lowercase().contains(&query))
     }
 }
 
@@ -466,6 +492,26 @@ mod tests {
         assert_eq!(page.stations[0].id, "jp1");
         let clicks: Vec<u32> = page.stations.iter().map(|s| s.clickcount).collect();
         assert!(clicks.windows(2).all(|w| w[0] >= w[1]));
+    }
+
+    #[test]
+    fn test_search_favorites_only_returns_favorited_stations() {
+        let f = Fixture::new();
+        let lib = f.load();
+        let favs = vec!["jp1".to_string(), "us1".to_string()];
+        let page = lib.search_favorites(&ListFilter::default(), &favs, 0, 50);
+        assert_eq!(page.total, 2);
+        assert!(page.stations.iter().all(|s| favs.contains(&s.id)));
+
+        // 收藏筛选仍叠加搜索/国家过滤，并正确分页。
+        let filtered = lib.search_favorites(
+            &ListFilter { query: String::new(), country: Some("JP".into()) },
+            &favs,
+            0,
+            50,
+        );
+        assert_eq!(filtered.total, 1);
+        assert_eq!(filtered.stations[0].id, "jp1");
     }
 
     #[test]
