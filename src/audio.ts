@@ -22,6 +22,21 @@ export function shouldReportStall(
 
 const STALL_TIMEOUT_MS = 8000;
 
+/** 连续 ended 自动续播达到上限后不再重试，上报后端走既有失败处理。 */
+export const MAX_ENDED_RESUMES = 3;
+
+/** 直播流被服务端正常关闭（ended）时的自愈闸门：仅在期望播放且是未托管的直连流时续播。 */
+export function shouldResumeOnEnded(
+  wantPlaying: boolean,
+  hasSource: boolean,
+  directStream: boolean,
+  consecutiveResumes: number,
+): boolean {
+  return (
+    wantPlaying && hasSource && directStream && consecutiveResumes < MAX_ENDED_RESUMES
+  );
+}
+
 export class AudioController {
   readonly audio: HTMLAudioElement;
 
@@ -30,6 +45,8 @@ export class AudioController {
   private loadStartedAt: number | null = null;
   private stallTimer: number | undefined;
   private stallReported = false;
+  private wantPlaying = false;
+  private endedResumes = 0;
 
   constructor() {
     this.audio = document.createElement("audio");
@@ -50,6 +67,7 @@ export class AudioController {
     const safeVolume = Number.isFinite(volume) ? Math.max(0, Math.min(100, volume)) : 100;
     this.audio.volume = safeVolume / 100;
     this.audio.muted = muted;
+    this.wantPlaying = playing;
 
     if (playback.token !== this.token) {
       this.token = playback.token;
@@ -83,6 +101,7 @@ export class AudioController {
   private async switchSource(url: string, playing: boolean): Promise<void> {
     this.destroyHls();
     this.resetWatchdog();
+    this.endedResumes = 0;
     this.audio.pause();
 
     if (!url) {
@@ -145,6 +164,7 @@ export class AudioController {
 
   private bindAudioEvents(): void {
     this.audio.addEventListener("playing", () => {
+      this.endedResumes = 0;
       if ("mediaSession" in navigator) {
         navigator.mediaSession.playbackState = "playing";
       }
@@ -164,21 +184,58 @@ export class AudioController {
         .catch(() => undefined);
     });
 
-    this.audio.addEventListener("loadstart", () => {
-      this.loadStartedAt = Date.now();
-      if (this.stallTimer !== undefined) window.clearTimeout(this.stallTimer);
-      this.stallTimer = window.setTimeout(() => {
-        if (this.loadStartedAt === null) return;
-        const elapsed = Date.now() - this.loadStartedAt;
-        if (
-          !this.audio.paused &&
-          shouldReportStall(this.audio.readyState, elapsed, this.stallReported)
-        ) {
-          this.stallReported = true;
-          void ipc.reportPlaybackError("stalled").catch(() => undefined);
-        }
-      }, STALL_TIMEOUT_MS);
+    // 服务端关闭直播连接时元素会静默进入 ended，此前无监听导致永久无声。
+    this.audio.addEventListener("ended", () => {
+      if (
+        shouldResumeOnEnded(
+          this.wantPlaying,
+          Boolean(this.audio.src),
+          this.hls === null,
+          this.endedResumes,
+        )
+      ) {
+        this.endedResumes += 1;
+        this.playSafely();
+        return;
+      }
+      // 多次续播仍立即结束：上报后端，由既有失败处理（按设置重试/切台/暂停）。
+      if (this.wantPlaying && this.hls === null) {
+        void ipc.reportPlaybackError("stream ended").catch(() => undefined);
+      }
     });
+
+    this.audio.addEventListener("loadstart", () => this.armStallWatchdog());
+    // 中途断流不会再次触发 loadstart，waiting/stalled 时重装看门狗才能被发现。
+    this.audio.addEventListener("waiting", () => this.armStallWatchdog());
+    this.audio.addEventListener("stalled", () => this.armStallWatchdog());
+  }
+
+  /** 8 秒看门狗：装表点为 loadstart 与中途 waiting/stalled，恢复后自然失效。 */
+  private armStallWatchdog(): void {
+    this.loadStartedAt = Date.now();
+    this.stallReported = false;
+    if (this.stallTimer !== undefined) window.clearTimeout(this.stallTimer);
+    this.stallTimer = window.setTimeout(() => {
+      if (this.loadStartedAt === null) return;
+      const elapsed = Date.now() - this.loadStartedAt;
+      if (this.audio.paused || !this.wantPlaying) return;
+      if (
+        !shouldReportStall(this.audio.readyState, elapsed, this.stallReported)
+      ) {
+        return;
+      }
+      if (this.hls) {
+        // hls.js 有自己的恢复流程，这里只上报，由后端决定切台。
+        this.stallReported = true;
+        void ipc.reportPlaybackError("stalled").catch(() => undefined);
+        return;
+      }
+      // 直连直播流中途断流：静默重连，等效用户手动「暂停再继续」；
+      // 重连失败会自然触发 error / ended，交给既有失败处理。
+      this.resetWatchdog();
+      this.audio.load();
+      this.playSafely();
+    }, STALL_TIMEOUT_MS);
   }
 
   private bindMediaSession(): void {

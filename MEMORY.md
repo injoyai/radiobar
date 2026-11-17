@@ -44,6 +44,13 @@ radiobar —— Tauri 2 + TypeScript（无前端框架）的 Windows 桌面电�
 - 若要隔离变量，用 `$env:WEBVIEW2_USER_DATA_FOLDER` 指向每次全新的目录，并且启动前确认 `Get-Process msedgewebview2,radiobar` 为空。
 - 删 `%LOCALAPPDATA%\com.local.radiobar\EBWebView` 或把 exe 移到干净目录可临时恢复，但**根因是上面两条**，别把它当修复。
 
+### 播放中途静默无声、暂停再继续才恢复（已修，2026-11-17）
+
+- 根因：icecast 直播流被服务端断开（EOF 或断连）时 `<audio>` 会**静默**进入 `ended`/`stalled`，旧代码没有 `ended` 监听、8 秒看门狗只在 `loadstart` 装一次（中途断流不再触发 loadstart）→ 永久无声且后端完全不知情。「暂停再继续能恢复」是因为 resume 路径重新调 `play()` 拉流——这就是自愈的原理。
+- **关键契约**：`autoNextOnFailure=true` 时 `report_playback_error` **一次上报就切台**（`consecutive_failures >= 3` 只管「连续多台失败后暂停」）。所以可自愈的瞬时断流绝不能上报，否则听得好好的突然被切台。
+- 修复在 `src/audio.ts`：`ended` → `shouldResumeOnEnded(wantPlaying, hasSource, 直连流, endedResumes)` 闸门自愈（上限 `MAX_ENDED_RESUMES=3`，超过才上报 "stream ended" 交后端切台）；`waiting`/`stalled` → `armStallWatchdog()` 重装看门狗，直连流超时静默重连（`load()`+`play()`），HLS 流只上报不重连（hls.js 自管恢复）；`wantPlaying` 在 `sync()` 里维护，避免自愈复活用户已暂停的会话。
+- 无法在沙箱里复现服务端断流，验证靠代码路径证据链 + 单测（闸门函数）；长期效果以用户实际收听为准。沙箱里 vitest/vite 也跑不了（`spawn EPERM`），要 `danger-full-access`。
+
 ## 验证吸附效果的正确做法
 
 1. 把 `radiobar.exe` 复制到项目目录**之外**（如 `F:\桌面\电台播放器-便携版\`）。
